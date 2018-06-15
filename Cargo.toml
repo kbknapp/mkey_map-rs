@@ -1,6 +1,7 @@
 [package]
 name = "mkey_map"
 version = "0.1.0"
-authors = ["Kevin K. <kbknapp@gmail.com>"]
+authors = ["Kevin K. <kbknapp@gmail.com>",
+            "Alena Yuryeva <nimfetrisa@gmail.com>"]
 
 [dependencies]
