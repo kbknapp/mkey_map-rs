@@ -1,6 +1,8 @@
 use std::fmt::Debug;
-use std::collections::{HashMap, HashSet};
-use std::hash::Hash;
+use std::collections::{hash_map::Entry::*, HashMap, HashSet};
+use std::hash::{Hash, Hasher};
+use std::collections::hash_map::DefaultHasher;
+use std::marker::PhantomData;
 
 // ! rustdoc
 
@@ -13,8 +15,9 @@ pub struct MKeyMap<'a, K1, K2, K3, V: 'a>
         V: Eq + Hash,
 {
     keys: HashMap<KeyType<K1, K2, K3>, usize>,
-    value_index: Vec<&'a V>,
-    values: HashSet<V>,
+    value_index: Vec<V>,
+    values: HashMap<u64, usize>,
+    _phantomData: PhantomData<&'a V>
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]
@@ -23,29 +26,6 @@ pub enum KeyType<T1, T2, T3> {
     Key2(T2),
     Key3(T3),
 }
-
-// macro_rules! existing_key {
-//     ($key1:ident) => {
-//         if  let Some(key1) = $key1.into() {
-//             self
-//                 .keys
-//                 .iter()
-//                 .enumerate()
-//                 .find(|(i, k)| k.0 == key1)
-//                 .map(|(i, k)| i)
-//         } else {  None};
-//     }
-// }
-
-// macro_rules! insert_key {
-//     ($key: ident, $storage:expr, $index:ident) => {
-//         if let Some(existing_key) = $key {
-//                 $storage[existing_key].1 = $index;
-//             } else {
-//                 $storage.push((key, $index));
-//             }
-//     }
-// }
 
 impl<'a, K1, K2, K3, V> MKeyMap<'a, K1, K2, K3, V>
 where
@@ -62,35 +42,22 @@ where
     //TODO ::from(x), ::with_capacity(n) etc
     //? set theory ops?
 
-    // pub fn insert(&mut self, key1: impl Into<Option<K1>>, key2: impl Into<Option<K2>>, key3: impl Into<Option<K3>>, value: V) -> usize {
-    //     let idx = self
-    //         .values
-    //         .iter()
-    //         .enumerate()
-    //         .find(|vt| vt.1 == &value)
-    //         .map(|vt| vt.0);
-
-
-    //     let  existing_key1 = existing_key!(key1);
-    //     let  existing_key2 = existing_key!(key2);
-    //     let  existing_key3 = existing_key!(key3);
-
-    //     if let Some(i) = idx {
-    //         insert_key!(key1, self.keys1, i);
-    //         insert_key!(key2, self.keys2, i);
-    //         insert_key!(key3, self.keys3, i);
-    //         return i;
-    //     } else {
-    //         self.values.push(value);
-    //         let index = self.values.len() - 1;
-    //         insert_key!(key1, self.keys1, index);
-    //         insert_key!(key2, self.keys2, index);
-    //         insert_key!(key3, self.keys3, index);
-    //         return index;
-    //     }
-    // }
     pub fn insert(&mut self, key: KeyType<K1, K2, K3>, value: V) -> usize {        
-        unimplemented!()
+        let index;
+        let mut hasher = DefaultHasher::new();
+        value.hash(&mut hasher);
+        let hash = hasher.finish();
+
+        if let Some(&idx) = self.values.get(&hash) {
+            index = idx;      
+        } else {
+            self.value_index.push(value);
+            index = self.value_index.len() - 1;
+            self.values.insert(hash, index);
+        }
+
+        self.keys.insert(key, index);
+        index
     }
     //TODO ::insert_many([x, y])
 
@@ -116,14 +83,8 @@ where
     }
     //TODO ::insert_keyset([Key1, Key2])
 
-    // pub fn get(&self, key: &'static str) -> Option<Value> {
-    //     self.keys
-    //         .iter()
-    //         .find(|k| k.0 == key)
-    //         .map(|k| self.values[k.1])
-    // }
     pub fn get(&self, key: KeyType<K1, K2, K3>) -> Option<&V> {
-        unimplemented!()
+        self.keys.get(&key).and_then(|&idx| self.value_index.get(idx))
     }
     //TODO ::get_first([KeyA, KeyB])
 
@@ -194,7 +155,7 @@ mod tests {
     #[test]
     fn get_some_value() {
         let mut map: MKeyMap<&str, &str, &str, &str> = MKeyMap::new();
-        map.insert(Key1("One"), "Value1");
+        {map.insert(Key1("One"), "Value1");}
         assert_eq!(map.get(Key1("One")), Some(&"Value1"));
     }
 
