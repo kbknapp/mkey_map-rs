@@ -1,23 +1,25 @@
-use std::fmt::Debug;
-use std::collections::{hash_map::Entry::*, HashMap, HashSet};
-use std::hash::{Hash, Hasher};
+use std::collections::hash_map;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::{hash_map::Entry::*, HashMap, HashSet};
+use std::fmt::Debug;
+use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
+use std::slice;
 
 // ! rustdoc
 
 #[derive(Debug, Default, PartialEq)]
-pub struct MKeyMap<'a, K1, K2, K3, V: 'a>
-    where 
-        K1: Eq + Hash, 
-        K2: Eq + Hash,
-        K3: Eq + Hash,
-        V: Eq + Hash,
+pub struct MKeyMap<'a, K1: 'a, K2: 'a, K3: 'a, V: 'a>
+where
+    K1: Eq + Hash,
+    K2: Eq + Hash,
+    K3: Eq + Hash,
+    V: Eq + Hash,
 {
     keys: HashMap<KeyType<K1, K2, K3>, usize>,
     value_index: Vec<V>,
-    values: HashMap<u64, usize>,
-    _phantomData: PhantomData<&'a V>
+    values: HashMap<u64, HashSet<usize>>,
+    _phantomData: PhantomData<&'a V>,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]
@@ -34,26 +36,38 @@ where
     K3: Default + PartialEq + Debug + Eq + Hash,
     V: Default + PartialEq + Debug + Eq + Hash,
 {
-    //type KT = KeyType<K1, K2, K3>;
-    
     pub fn new() -> Self {
         MKeyMap::default()
     }
     //TODO ::from(x), ::with_capacity(n) etc
     //? set theory ops?
 
-    pub fn insert(&mut self, key: KeyType<K1, K2, K3>, value: V) -> usize {        
+    pub fn insert(&mut self, key: KeyType<K1, K2, K3>, value: V) -> usize {
         let index;
         let mut hasher = DefaultHasher::new();
         value.hash(&mut hasher);
         let hash = hasher.finish();
 
-        if let Some(&idx) = self.values.get(&hash) {
-            index = idx;      
+        if let Some((idx, _)) = self.values.get(&hash).and_then(|ids| {
+            ids.iter()
+                .map(|&x| (x, &self.value_index[x]))
+                .filter(|(i, x)| x == &&value)
+                .next()
+        }) {
+            index = idx;
         } else {
             self.value_index.push(value);
             index = self.value_index.len() - 1;
-            self.values.insert(hash, index);
+            self.values
+                .entry(hash)
+                .and_modify(|x| {
+                    x.insert(index);
+                })
+                .or_insert({
+                    let mut set = HashSet::new();
+                    set.insert(index);
+                    set
+                });
         }
 
         self.keys.insert(key, index);
@@ -84,7 +98,9 @@ where
     //TODO ::insert_keyset([Key1, Key2])
 
     pub fn get(&self, key: KeyType<K1, K2, K3>) -> Option<&V> {
-        self.keys.get(&key).and_then(|&idx| self.value_index.get(idx))
+        self.keys
+            .get(&key)
+            .and_then(|&idx| self.value_index.get(idx))
     }
     //TODO ::get_first([KeyA, KeyB])
 
@@ -114,6 +130,8 @@ where
         unimplemented!()
     }
     //TODO ::remove_many([KeyA, KeyB])
+    //? probably shouldn't add a possibility for removal?
+    //? or remove by replacement by some dummy object, so the order is preserved
 
     // pub fn remove_key(&mut self, key: &'static str) {
     //     let existing_key = self
@@ -132,18 +150,40 @@ where
     }
     //TODO ::remove_keys([KeyA, KeyB])
 
-    //    pub fn iter_keys<'a>(&'a self) -> std::iter::Map<std::slice::Iter<'a, Key>, Fn(Key) -> &'static str > {
-    //        self.keys.iter().map(|(k, i)| k)
-    //    }
-    pub fn iter_keys(&'a self) -> impl Iterator + 'a {
-        self.keys.keys()
+    pub fn keys(&'a self) -> Keys<'a, K1, K2, K3, usize> {
+        Keys {
+            iter: self.keys.keys(),
+        }
     }
 
-    //    pub fn iter_values(&self) -> impl Iterator {
-    //        self.values.iter()
-    //    }
-    pub fn iter_values(&'a self) -> impl Iterator + 'a {
-        self.values.iter()
+    pub fn values(&'a self) -> Values<'a, V> {
+        Values {
+            iter: self.value_index.iter(),
+        }
+    }
+}
+
+pub struct Keys<'a, K1: 'a, K2: 'a, K3: 'a, V: 'a> {
+    iter: hash_map::Keys<'a, KeyType<K1, K2, K3>, V>,
+}
+
+impl<'a, K1, K2, K3, V> Iterator for Keys<'a, K1, K2, K3, V> {
+    type Item = &'a KeyType<K1, K2, K3>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next()
+    }
+}
+
+pub struct Values<'a, V: 'a> {
+    iter: slice::Iter<'a, V>,
+}
+
+impl<'a, V> Iterator for Values<'a, V> {
+    type Item = &'a V;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next()
     }
 }
 
@@ -155,7 +195,9 @@ mod tests {
     #[test]
     fn get_some_value() {
         let mut map: MKeyMap<&str, &str, &str, &str> = MKeyMap::new();
-        {map.insert(Key1("One"), "Value1");}
+        {
+            map.insert(Key1("One"), "Value1");
+        }
         assert_eq!(map.get(Key1("One")), Some(&"Value1"));
     }
 
@@ -219,16 +261,20 @@ mod tests {
         assert_eq!(map.values.len(), 1);
     }
 
-    //    #[test]
-    //    fn iter_keys() {
-    //        let mut map = MKeyMap::new();
-    //        map.insert(Key1("One"), "Value1");
-    //        map.insert(Key2("Two"), "Value2");
-    //        map.insert(Key3("Three"), "Value1");
-    //        let mut iter = map. iter_keys();
-    //        assert_eq!(iter.next().unwrap(), Key1("One"));
-    //        assert_eq!(iter.next().unwrap(), Key2("Two"));
-    //        assert_eq!(iter.next().unwrap(), Key3("Three"));
-    //        assert_eq!(iter.next(), None);
-    //    }
+    #[test]
+    fn iter_keys() {
+        let mut map: MKeyMap<&str, &str, &str, &str> = MKeyMap::new();
+        map.insert(Key1("One"), "Value1");
+        map.insert(Key2("Two"), "Value2");
+        map.insert(Key3("Three"), "Value1");
+        let mut iter = map.keys();
+        let mut ground_truth = HashSet::new();
+        ground_truth.insert(&Key1("One"));
+        ground_truth.insert(&Key2("Two"));
+        ground_truth.insert(&Key3("Three"));
+        assert_eq!(
+            ground_truth.symmetric_difference(&iter.collect()).count(),
+            0
+        );
+    }
 }
