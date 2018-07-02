@@ -2,6 +2,7 @@
 
 extern crate mkey_map;
 extern crate test;
+extern crate clap;
 
 use mkey_map::MKeyMap;
 use mkey_map::KeyType::*;

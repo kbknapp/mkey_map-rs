@@ -5,3 +5,7 @@ authors = ["Kevin K. <kbknapp@gmail.com>",
             "Alena Yuryeva <nimfetrisa@gmail.com>"]
 
 [dependencies]
+clap = {path="../clap-rs"}
+
+[dev-dependencies]
+clap = {path="../clap-rs"}
