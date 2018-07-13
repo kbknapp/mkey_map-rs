@@ -1,8 +1,10 @@
+#![feature(nll)]
 extern crate clap;
 
 use std::collections::hash_map;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsStr;
 use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 use std::slice;
@@ -10,22 +12,22 @@ use std::slice;
 
 #[derive(Default, PartialEq, Debug)]
 pub struct MKeyMap<'a, 'b>
-where 'a: 'b
+where
+    'a: 'b,
 {
     keys: HashMap<KeyType<'a>, usize>,
     value_index: Vec<clap::Arg<'a, 'b>>,
     values: HashMap<u64, HashSet<usize>>,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum KeyType<'a> {
     Short(char),
-    Long(&'a str),
+    Long(&'a OsStr),
     Position(usize),
 }
 
-impl<'a, 'b> MKeyMap<'a, 'b>
-{
+impl<'a, 'b> MKeyMap<'a, 'b> {
     pub fn new() -> Self {
         MKeyMap::default()
     }
@@ -65,61 +67,45 @@ impl<'a, 'b> MKeyMap<'a, 'b>
 
     //TODO ::insert_many([x, y])
 
-    // pub fn insert_key(&mut self, key: &'static str, index: usize) -> Result<(), ()> {
-    //     if self.values.len() < index {
-    //         return Err(());
-    //     }
-    //     let existing_key = self
-    //         .keys
-    //         .iter()
-    //         .enumerate()
-    //         .find(|(i, k)| k.0 == key)
-    //         .map(|(i, k)| i);
-    //     if let Some(existing_key) = existing_key {
-    //         self.keys[existing_key].1 = index;
-    //     } else {
-    //         self.keys.push((key, index));
-    //     }
-    //     Ok(())
-    // }
     pub fn insert_key(&mut self, key: KeyType<'a>, index: usize) {
         if index >= self.values.len() {
             panic!("Index out of bounds");
         }
 
-        let idx = self.keys.insert(key, index);
+        self.keys.insert(key, index);
     }
     //TODO ::insert_keyset([Long, Key2])
 
-    pub fn get(&self, key: KeyType) -> Option<&clap::Arg> {
+    pub fn insert_key_by_name(&mut self, key: KeyType<'a>, name: &str) {
+        let index = self
+            .value_index
+            .iter()
+            .position(|x| x.name == name)
+            .expect("No such name found");
+
+        self.keys.insert(key, index);
+    }
+
+    pub fn get(&self, key: KeyType<'a>) -> &clap::Arg<'a, 'b> {
         self.keys
             .get(&key)
             .and_then(|&idx| self.value_index.get(idx))
+            .expect(&format!("No entry for the key: {:?}", key))
     }
     //TODO ::get_first([KeyA, KeyB])
+
+    pub fn get_mut(&mut self, key: KeyType<'a>) -> &mut clap::Arg<'a, 'b> {
+        let idx = *self
+            .keys
+            .get(&key)
+            .expect(&format!("No entry for the key: {:?}", key));
+        self.value_index.get_mut(idx).unwrap()
+    }
 
     pub fn is_empty(&self) -> bool {
         self.keys.is_empty() && self.values.is_empty()
     }
 
-    //    pub fn remove(&mut self, key: &'static str) -> Option<Value> {
-    //        let idx = self.keys.iter().find(|k| k.0 == key).map(|k| k.1);
-    //        if let Some(idx) = idx {
-    //            let value = self.values.swap_remove(idx);
-    //            let indexs: Vec<usize> = self
-    //                .keys
-    //                .iter()
-    //                .enumerate()
-    //                .filter_map(|(i, kt)| if i == kt.1 { Some(i) } else { None })
-    //                .collect::<Vec<_>>();
-    //            for i in indexs {
-    //                self.keys.remove(i);
-    //            }
-    //            Some(value)
-    //        } else {
-    //            None
-    //        }
-    //    }
     pub fn remove(&mut self, key: KeyType) -> Option<clap::Arg> {
         unimplemented!()
     }
@@ -127,18 +113,6 @@ impl<'a, 'b> MKeyMap<'a, 'b>
     //? probably shouldn't add a possibility for removal?
     //? or remove by replacement by some dummy object, so the order is preserved
 
-    // pub fn remove_key(&mut self, key: &'static str) {
-    //     let existing_key = self
-    //         .keys
-    //         .iter()
-    //         .enumerate()
-    //         .find(|(i, k)| k.0 == key)
-    //         .map(|(i, k)| i);
-
-    //     if let Some(index) = existing_key {
-    //         self.keys.swap_remove(index);
-    //     }
-    // }
     pub fn remove_key(&mut self, key: KeyType) {
         unimplemented!()
     }
@@ -161,7 +135,7 @@ pub struct Keys<'a, V: 'a> {
     iter: hash_map::Keys<'a, KeyType<'a>, V>,
 }
 
-impl<'a,V> Iterator for Keys<'a, V> {
+impl<'a, V> Iterator for Keys<'a, V> {
     type Item = &'a KeyType<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -181,28 +155,31 @@ impl<'a, V> Iterator for Values<'a, V> {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     extern crate clap;
     use super::*;
-    use KeyType::*;
     use std::ffi::OsStr;
+    use KeyType::*;
 
     #[test]
     fn get_some_value() {
         let mut map: MKeyMap = MKeyMap::new();
         {
-            map.insert(Long("One"), clap::Arg::with_name("Value1"));
+            map.insert(Long(&OsStr::new("One")), clap::Arg::with_name("Value1"));
         }
-        assert_eq!(map.get(Long("One")), Some(&clap::Arg::with_name("Value1")));
+        assert_eq!(
+            map.get(Long(&OsStr::new("One"))),
+            &clap::Arg::with_name("Value1")
+        );
     }
 
     #[test]
+    #[should_panic]
     fn get_none_value() {
         let mut map: MKeyMap = MKeyMap::new();
-        map.insert(Long("One"), clap::Arg::with_name("Value1"));
-        assert_eq!(map.get(Long("Two")), None);
+        map.insert(Long(&OsStr::new("One")), clap::Arg::with_name("Value1"));
+        map.get(Long(&OsStr::new("Two")));
     }
 
     //    #[test]
@@ -216,18 +193,24 @@ mod tests {
     #[test]
     fn insert_duplicate_key() {
         let mut map: MKeyMap = MKeyMap::new();
-        map.insert(Long("One"), clap::Arg::with_name("Value1"));
-        assert_eq!(map.insert(Long("One"),clap::Arg::with_name("Value2")), 1);
+        map.insert(Long(&OsStr::new("One")), clap::Arg::with_name("Value1"));
+        assert_eq!(
+            map.insert(Long(&OsStr::new("One")), clap::Arg::with_name("Value2")),
+            1
+        );
     }
 
     #[test]
     fn insert_duplicate_value() {
         let mut map: MKeyMap = MKeyMap::new();
-        map.insert(Long("One"), clap::Arg::with_name("Value1"));
+        map.insert(Long(&OsStr::new("One")), clap::Arg::with_name("Value1"));
         let orig_len = map.values.len();
-        map.insert(Long("Two"), clap::Arg::with_name("Value1"));
+        map.insert(Long(&OsStr::new("Two")), clap::Arg::with_name("Value1"));
         assert_eq!(map.values.len(), orig_len);
-        assert_eq!(map.get(Long("One")), map.get(Long("Two")));
+        assert_eq!(
+            map.get(Long(&OsStr::new("One"))),
+            map.get(Long(&OsStr::new("Two")))
+        );
     }
 
     //    #[test]
@@ -242,18 +225,21 @@ mod tests {
     #[test]
     fn insert_multiple_keys() {
         let mut map: MKeyMap = MKeyMap::new();
-        let index = map.insert(Long("One"), clap::Arg::with_name("Value1"));
-        map.insert_key(Long("Two"), index);
-        assert_eq!(map.get(Long("One")), map.get(Long("Two")));
+        let index = map.insert(Long(&OsStr::new("One")), clap::Arg::with_name("Value1"));
+        map.insert_key(Long(&OsStr::new("Two")), index);
+        assert_eq!(
+            map.get(Long(&OsStr::new("One"))),
+            map.get(Long(&OsStr::new("Two")))
+        );
         assert_eq!(map.values.len(), 1);
     }
 
     #[test]
     fn remove_key() {
         let mut map: MKeyMap = MKeyMap::new();
-        let index = map.insert(Long("One"), clap::Arg::with_name("Value1"));
-        map.insert_key(Long("Two"), index);
-        map.remove_key(Long("One"));
+        let index = map.insert(Long(&OsStr::new("One")), clap::Arg::with_name("Value1"));
+        map.insert_key(Long(&OsStr::new("Two")), index);
+        map.remove_key(Long(&OsStr::new("One")));
         assert_eq!(map.keys.len(), 1);
         assert_eq!(map.values.len(), 1);
     }
@@ -261,14 +247,14 @@ mod tests {
     #[test]
     fn iter_keys() {
         let mut map: MKeyMap = MKeyMap::new();
-        map.insert(Long("One"), clap::Arg::with_name("Value1"));
-        map.insert(Long("Two"),clap::Arg::with_name("Value2"));
+        map.insert(Long(&OsStr::new("One")), clap::Arg::with_name("Value1"));
+        map.insert(Long(&OsStr::new("Two")), clap::Arg::with_name("Value2"));
         map.insert(Position(1), clap::Arg::with_name("Value1"));
-        let mut iter = map.keys();
+        let mut iter = map.keys().cloned();
         let mut ground_truth = HashSet::new();
-        ground_truth.insert(&Long("One"));
-        ground_truth.insert(&Long("Two"));
-        ground_truth.insert(&Position(1));
+        ground_truth.insert(Long(&OsStr::new("One")));
+        ground_truth.insert(Long(&OsStr::new("Two")));
+        ground_truth.insert(Position(1));
         assert_eq!(
             ground_truth.symmetric_difference(&iter.collect()).count(),
             0
