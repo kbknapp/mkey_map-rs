@@ -5,7 +5,6 @@ use std::collections::hash_map;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
-use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 use std::slice;
 // ! rustdoc
@@ -37,13 +36,15 @@ impl<'a, 'b> MKeyMap<'a, 'b> {
     pub fn insert(&mut self, key: KeyType<'a>, value: clap::Arg<'a, 'b>) -> usize {
         let index;
         let mut hasher = DefaultHasher::new();
+
         value.hash(&mut hasher);
+
         let hash = hasher.finish();
 
         if let Some((idx, _)) = self.values.get(&hash).and_then(|ids| {
             ids.iter()
                 .map(|&x| (x, &self.value_index[x]))
-                .find(|(i, x)| x == &&value)
+                .find(|(_i, x)| x == &&value)
         }) {
             index = idx;
         } else {
@@ -99,6 +100,7 @@ impl<'a, 'b> MKeyMap<'a, 'b> {
             .keys
             .get(&key)
             .expect(&format!("No entry for the key: {:?}", key));
+
         self.value_index.get_mut(idx).unwrap()
     }
 
@@ -158,6 +160,7 @@ impl<'a, V> Iterator for Values<'a, V> {
 #[cfg(test)]
 mod tests {
     extern crate clap;
+
     use super::*;
     use std::ffi::OsStr;
     use KeyType::*;
@@ -165,9 +168,11 @@ mod tests {
     #[test]
     fn get_some_value() {
         let mut map: MKeyMap = MKeyMap::new();
+
         {
             map.insert(Long(&OsStr::new("One")), clap::Arg::with_name("Value1"));
         }
+
         assert_eq!(
             map.get(Long(&OsStr::new("One"))),
             &clap::Arg::with_name("Value1")
@@ -178,6 +183,7 @@ mod tests {
     #[should_panic]
     fn get_none_value() {
         let mut map: MKeyMap = MKeyMap::new();
+
         map.insert(Long(&OsStr::new("One")), clap::Arg::with_name("Value1"));
         map.get(Long(&OsStr::new("Two")));
     }
@@ -193,7 +199,9 @@ mod tests {
     #[test]
     fn insert_duplicate_key() {
         let mut map: MKeyMap = MKeyMap::new();
+
         map.insert(Long(&OsStr::new("One")), clap::Arg::with_name("Value1"));
+
         assert_eq!(
             map.insert(Long(&OsStr::new("One")), clap::Arg::with_name("Value2")),
             1
@@ -203,9 +211,13 @@ mod tests {
     #[test]
     fn insert_duplicate_value() {
         let mut map: MKeyMap = MKeyMap::new();
+
         map.insert(Long(&OsStr::new("One")), clap::Arg::with_name("Value1"));
+
         let orig_len = map.values.len();
+
         map.insert(Long(&OsStr::new("Two")), clap::Arg::with_name("Value1"));
+
         assert_eq!(map.values.len(), orig_len);
         assert_eq!(
             map.get(Long(&OsStr::new("One"))),
@@ -226,7 +238,23 @@ mod tests {
     fn insert_multiple_keys() {
         let mut map: MKeyMap = MKeyMap::new();
         let index = map.insert(Long(&OsStr::new("One")), clap::Arg::with_name("Value1"));
+
         map.insert_key(Long(&OsStr::new("Two")), index);
+
+        assert_eq!(
+            map.get(Long(&OsStr::new("One"))),
+            map.get(Long(&OsStr::new("Two")))
+        );
+        assert_eq!(map.values.len(), 1);
+    }
+    
+    #[test]
+    fn insert_by_name() {
+        let mut map: MKeyMap = MKeyMap::new();
+        let index = map.insert(Long(&OsStr::new("One")), clap::Arg::with_name("Value1"));
+
+        map.insert_key_by_name(Long(&OsStr::new("Two")), "Value1");
+
         assert_eq!(
             map.get(Long(&OsStr::new("One"))),
             map.get(Long(&OsStr::new("Two")))
@@ -235,11 +263,25 @@ mod tests {
     }
 
     #[test]
+    fn get_mutable(){
+        let mut map: MKeyMap = MKeyMap::new();
+
+        map.insert(Long(&OsStr::new("One")), clap::Arg::with_name("Value1"));
+
+        assert_eq!(
+            map.get_mut(Long(&OsStr::new("One"))),
+            &mut clap::Arg::with_name("Value1")
+        );        
+    }
+
+    #[test]
     fn remove_key() {
         let mut map: MKeyMap = MKeyMap::new();
         let index = map.insert(Long(&OsStr::new("One")), clap::Arg::with_name("Value1"));
+
         map.insert_key(Long(&OsStr::new("Two")), index);
         map.remove_key(Long(&OsStr::new("One")));
+
         assert_eq!(map.keys.len(), 1);
         assert_eq!(map.values.len(), 1);
     }
@@ -247,14 +289,18 @@ mod tests {
     #[test]
     fn iter_keys() {
         let mut map: MKeyMap = MKeyMap::new();
+
         map.insert(Long(&OsStr::new("One")), clap::Arg::with_name("Value1"));
         map.insert(Long(&OsStr::new("Two")), clap::Arg::with_name("Value2"));
         map.insert(Position(1), clap::Arg::with_name("Value1"));
-        let mut iter = map.keys().cloned();
+
+        let iter = map.keys().cloned();
         let mut ground_truth = HashSet::new();
+
         ground_truth.insert(Long(&OsStr::new("One")));
         ground_truth.insert(Long(&OsStr::new("Two")));
         ground_truth.insert(Position(1));
+
         assert_eq!(
             ground_truth.symmetric_difference(&iter.collect()).count(),
             0
